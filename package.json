@@ -1,5 +1,25 @@
 {
   "dependencies": {
     "fastify": "^5.12.5"
-  }
+  },
+  "name": "nexbase-auth-service",
+  "version": "1.0.0",
+  "description": "> A production-oriented authentication and authorization service built with Node.js, TypeScript, and Fastify.",
+  "main": "index.js",
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bharti-kajal/nexbase-auth-service.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/bharti-kajal/nexbase-auth-service/issues"
+  },
+  "homepage": "https://github.com/bharti-kajal/nexbase-auth-service#readme"
 }

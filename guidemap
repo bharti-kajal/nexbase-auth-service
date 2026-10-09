@@ -1,8 +1,0 @@
-
-1.Check Data Initial server setup 
-// Why fastify server used not express 
-
-step 1 - Fastify server setup
-npm i fastify
-
-Difference between yarn/npm 
