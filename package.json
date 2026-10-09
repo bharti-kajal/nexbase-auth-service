@@ -1,12 +1,12 @@
 {
   "dependencies": {
-    "fastify": "^5.12.5"
+    "fastify": "^5.12.5",
+    "typescript": "^7.0.2"
   },
   "name": "nexbase-auth-service",
   "version": "1.0.0",
   "description": "> A production-oriented authentication and authorization service built with Node.js, TypeScript, and Fastify.",
   "main": "index.js",
-  "devDependencies": {},
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },

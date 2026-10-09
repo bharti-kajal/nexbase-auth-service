@@ -1,24 +1,16 @@
-// ESM
-import Fastify from 'fastify'
+import fastify from "fastify";
+const port : number = 3000;
+const app = fastify();
 
-const fastify = Fastify({
-  logger: true
-})
-// CommonJs
-const fastify = require('fastify')({
-  logger: true
-})
+app.get("/", async (request, reply) => {
+  return { message: "Hello, World!" };
+});
 
-// Declare a route
-fastify.get('/', function (request, reply) {
-  reply.send({ hello: 'world' })
-})
-
-// Run the server!
-fastify.listen({ port: 3000 }, function (err, address) {
+app.listen({ port }, (err, port) => {
   if (err) {
-    fastify.log.error(err)
-    process.exit(1)
+    console.error(err);
+    process.exit(1);
   }
-  // Server is now listening on ${address}
-})
+  console.log(`Server listen at ${port}`);
+}); 
+
