@@ -8,6 +8,8 @@
   "description": "> A production-oriented authentication and authorization service built with Node.js, TypeScript, and Fastify.",
   "main": "index.js",
   "scripts": {
+    "dev": "node --watch app.ts",
+    "start": "node app.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
