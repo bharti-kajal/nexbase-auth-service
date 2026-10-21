@@ -2,22 +2,23 @@ import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import { env } from "../../config/env.ts";
 import { authService, type User } from "./auth.services.ts";
+import { prisma } from "../../config/db.ts";
 
 export interface RefreshTokenRecord {
-  id: string; // Unique token ID
+  id: string;
   userId: string;
-  familyId: string; // Session / device family ID
+  familyId: string;
   isRevoked: boolean;
   expiresAt: Date;
   createdAt: Date;
-  userAgent?: string;
-  ipAddress?: string;
+  userAgent?: string | null;
+  ipAddress?: string | null;
 }
 
 export interface AccessTokenPayload {
   userId: string;
   email: string;
-  role: "user" | "admin";
+  role: "USER" | "ADMIN";
   tokenVersion: number;
 }
 
@@ -28,8 +29,21 @@ export interface RefreshTokenPayload {
   tokenVersion: number;
 }
 
-// In-memory token store (will connect to Redis / PostgreSQL in next phase)
-const refreshTokens = new Map<string, RefreshTokenRecord>();
+// In-memory fallback if PostgreSQL is not currently running
+const memoryRefreshTokens = new Map<string, RefreshTokenRecord>();
+
+let isDbAvailable: boolean | null = null;
+
+async function checkDb(): Promise<boolean> {
+  if (isDbAvailable !== null) return isDbAvailable;
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    isDbAvailable = true;
+  } catch {
+    isDbAvailable = false;
+  }
+  return isDbAvailable;
+}
 
 export class TokenService {
   /**
@@ -65,21 +79,33 @@ export class TokenService {
   ): Promise<{ accessToken: string; refreshToken: string; familyId: string }> {
     const familyId = crypto.randomUUID();
     const tokenId = crypto.randomUUID();
-
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-    const record: RefreshTokenRecord = {
-      id: tokenId,
-      userId: user.id,
-      familyId,
-      isRevoked: false,
-      expiresAt,
-      createdAt: new Date(),
-      userAgent,
-      ipAddress
-    };
-
-    refreshTokens.set(tokenId, record);
+    const dbOk = await checkDb();
+    if (dbOk) {
+      await prisma.refreshToken.create({
+        data: {
+          id: tokenId,
+          userId: user.id,
+          familyId,
+          isRevoked: false,
+          expiresAt,
+          userAgent,
+          ipAddress
+        }
+      });
+    } else {
+      memoryRefreshTokens.set(tokenId, {
+        id: tokenId,
+        userId: user.id,
+        familyId,
+        isRevoked: false,
+        expiresAt,
+        createdAt: new Date(),
+        userAgent,
+        ipAddress
+      });
+    }
 
     const refreshTokenPayload: RefreshTokenPayload = {
       tokenId,
@@ -117,38 +143,66 @@ export class TokenService {
       throw new Error("SESSION_REVOKED");
     }
 
-    const tokenRecord = refreshTokens.get(payload.tokenId);
+    const dbOk = await checkDb();
+    let tokenRecord: RefreshTokenRecord | null = null;
+
+    if (dbOk) {
+      tokenRecord = (await prisma.refreshToken.findUnique({
+        where: { id: payload.tokenId }
+      })) as RefreshTokenRecord | null;
+    } else {
+      tokenRecord = memoryRefreshTokens.get(payload.tokenId) || null;
+    }
+
     if (!tokenRecord) {
       throw new Error("TOKEN_NOT_FOUND");
     }
 
     // BREACH / REPLAY DETECTION
     if (tokenRecord.isRevoked) {
-      // A token that was already rotated has been reused!
-      // Invalidate the entire family (revoke all tokens for this session)
-      this.revokeTokenFamily(tokenRecord.familyId);
+      // Replay detected: Revoke entire session family
+      await this.revokeTokenFamily(tokenRecord.familyId);
       throw new Error("TOKEN_REUSE_DETECTED");
     }
 
-    // Invalidate the presented token (it is now single-used)
-    tokenRecord.isRevoked = true;
+    // Invalidate the presented token (single-use)
+    if (dbOk) {
+      await prisma.refreshToken.update({
+        where: { id: payload.tokenId },
+        data: { isRevoked: true }
+      });
+    } else {
+      tokenRecord.isRevoked = true;
+    }
 
     // Issue a NEW refresh token linked to the SAME family
     const newTokenId = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-    const newRecord: RefreshTokenRecord = {
-      id: newTokenId,
-      userId: user.id,
-      familyId: tokenRecord.familyId,
-      isRevoked: false,
-      expiresAt,
-      createdAt: new Date(),
-      userAgent: userAgent || tokenRecord.userAgent,
-      ipAddress: ipAddress || tokenRecord.ipAddress
-    };
-
-    refreshTokens.set(newTokenId, newRecord);
+    if (dbOk) {
+      await prisma.refreshToken.create({
+        data: {
+          id: newTokenId,
+          userId: user.id,
+          familyId: tokenRecord.familyId,
+          isRevoked: false,
+          expiresAt,
+          userAgent: userAgent || tokenRecord.userAgent,
+          ipAddress: ipAddress || tokenRecord.ipAddress
+        }
+      });
+    } else {
+      memoryRefreshTokens.set(newTokenId, {
+        id: newTokenId,
+        userId: user.id,
+        familyId: tokenRecord.familyId,
+        isRevoked: false,
+        expiresAt,
+        createdAt: new Date(),
+        userAgent: userAgent || tokenRecord.userAgent,
+        ipAddress: ipAddress || tokenRecord.ipAddress
+      });
+    }
 
     const newRefreshPayload: RefreshTokenPayload = {
       tokenId: newTokenId,
@@ -176,9 +230,18 @@ export class TokenService {
   async revokeSession(rawToken: string): Promise<void> {
     try {
       const payload = jwt.verify(rawToken, env.JWT_REFRESH_SECRET) as RefreshTokenPayload;
-      const record = refreshTokens.get(payload.tokenId);
-      if (record) {
-        this.revokeTokenFamily(record.familyId);
+      const dbOk = await checkDb();
+
+      if (dbOk) {
+        const record = await prisma.refreshToken.findUnique({ where: { id: payload.tokenId } });
+        if (record) {
+          await this.revokeTokenFamily(record.familyId);
+        }
+      } else {
+        const record = memoryRefreshTokens.get(payload.tokenId);
+        if (record) {
+          await this.revokeTokenFamily(record.familyId);
+        }
       }
     } catch {
       // Ignore if token is already invalid
@@ -188,10 +251,18 @@ export class TokenService {
   /**
    * Invalidate all refresh tokens belonging to a family
    */
-  revokeTokenFamily(familyId: string): void {
-    for (const record of refreshTokens.values()) {
-      if (record.familyId === familyId) {
-        record.isRevoked = true;
+  async revokeTokenFamily(familyId: string): Promise<void> {
+    const dbOk = await checkDb();
+    if (dbOk) {
+      await prisma.refreshToken.updateMany({
+        where: { familyId },
+        data: { isRevoked: true }
+      });
+    } else {
+      for (const record of memoryRefreshTokens.values()) {
+        if (record.familyId === familyId) {
+          record.isRevoked = true;
+        }
       }
     }
   }
@@ -201,13 +272,21 @@ export class TokenService {
    */
   async revokeAllUserSessions(userId: string): Promise<void> {
     await authService.incrementTokenVersion(userId);
-    for (const record of refreshTokens.values()) {
-      if (record.userId === userId) {
-        record.isRevoked = true;
+    const dbOk = await checkDb();
+
+    if (dbOk) {
+      await prisma.refreshToken.updateMany({
+        where: { userId },
+        data: { isRevoked: true }
+      });
+    } else {
+      for (const record of memoryRefreshTokens.values()) {
+        if (record.userId === userId) {
+          record.isRevoked = true;
+        }
       }
     }
   }
 }
 
 export const tokenService = new TokenService();
-
