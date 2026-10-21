@@ -105,7 +105,41 @@ async function run() {
   });
   console.log("Logout status (expected 200):", logoutRes.statusCode);
 
-  console.log("\n✅ ALL SECURITY VERIFICATION TESTS PASSED (IN-MEMORY FASTIFY INJECT)!");
+  console.log("\n=== 9. Rate Limit Test: Brute-Force Defense on /login (Limit: 5/min) ===");
+  let rateLimited = false;
+  let lastStatus = 0;
+  for (let i = 1; i <= 6; i++) {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: {
+        email: "attacker@example.com",
+        password: "WrongPassword123!"
+      }
+    });
+    lastStatus = res.statusCode;
+    if (res.statusCode === 429) {
+      rateLimited = true;
+      console.log(`Request #${i} was blocked with 429 Too Many Requests (Rate limit active)`);
+      break;
+    }
+  }
+
+  if (!rateLimited) {
+    throw new Error(`Expected 429 Too Many Requests within 6 requests, got: ${lastStatus}`);
+  }
+
+  console.log("\n=== 10. Security Headers Test (Helmet) ===");
+  const healthRes = await app.inject({ method: "GET", url: "/health" });
+  const headers = healthRes.headers;
+  console.log("x-content-type-options:", headers["x-content-type-options"]);
+  console.log("x-frame-options:", headers["x-frame-options"]);
+  console.log("strict-transport-security:", Boolean(headers["strict-transport-security"]));
+  if (!headers["x-content-type-options"] || !headers["x-frame-options"]) {
+    throw new Error("Missing essential security headers");
+  }
+
+  console.log("\n✅ ALL 10 SECURITY HARDENING & AUTH VERIFICATION TESTS PASSED!");
   await app.close();
 }
 
@@ -113,4 +147,3 @@ run().catch((err) => {
   console.error("Test failed:", err);
   process.exit(1);
 });
-
