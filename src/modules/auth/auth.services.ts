@@ -78,7 +78,17 @@ export class AuthService {
     const { passwordHash: _, ...safeUser } = user;
     return safeUser;
   }
+
+  /**
+   * Increment user's tokenVersion to instantly invalidate all active tokens.
+   */
+  async incrementTokenVersion(id: string): Promise<number | null> {
+    const user = usersById.get(id);
+    if (!user) return null;
+    user.tokenVersion += 1;
+    user.updatedAt = new Date();
+    return user.tokenVersion;
+  }
 }
 
 export const authService = new AuthService();
-
