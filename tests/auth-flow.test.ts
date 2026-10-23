@@ -139,7 +139,19 @@ async function run() {
     throw new Error("Missing essential security headers");
   }
 
-  console.log("\n✅ ALL 10 SECURITY HARDENING & AUTH VERIFICATION TESTS PASSED!");
+  console.log("\n=== 11. Swagger UI & OpenAPI Specification Test ===");
+  const swaggerSpecRes = await app.inject({ method: "GET", url: "/docs/json" });
+  console.log("Swagger JSON spec status (expected 200):", swaggerSpecRes.statusCode);
+  if (swaggerSpecRes.statusCode !== 200) throw new Error("Swagger JSON spec not accessible");
+  const swaggerSpec = swaggerSpecRes.json();
+  console.log("OpenAPI Title:", swaggerSpec.info?.title);
+  console.log("OpenAPI Version:", swaggerSpec.openapi);
+  console.log("Documented Routes:", Object.keys(swaggerSpec.paths || {}).join(", "));
+
+  const swaggerUiRes = await app.inject({ method: "GET", url: "/docs" });
+  console.log("Swagger UI HTML status (expected 200/302):", swaggerUiRes.statusCode);
+
+  console.log("\n✅ ALL 11 SECURITY, AUTH & SWAGGER SPECIFICATION TESTS PASSED!");
   await app.close();
 }
 
